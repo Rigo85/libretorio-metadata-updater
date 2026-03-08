@@ -1,0 +1,75 @@
+module.exports = {
+    "env": {
+        "browser": true,
+        "es6": true,
+        "node": true
+    },
+    "parser": "@typescript-eslint/parser",
+    "parserOptions": {
+        "project": "tsconfig.json",
+        "sourceType": "module"
+    },
+    "plugins": [
+        "eslint-plugin-no-null",
+        "eslint-plugin-jsdoc",
+        "@typescript-eslint",
+        "jsdoc"
+    ],
+    "root": true,
+    "rules": {
+        "@typescript-eslint/indent": ["error", "tab", {"ignoredNodes": ["PropertyDefinition"]}],
+        "@typescript-eslint/member-delimiter-style": [
+            "error",
+            {
+                "multiline": {
+                    "delimiter": "semi",
+                    "requireLast": true
+                },
+                "singleline": {
+                    "delimiter": "semi",
+                    "requireLast": false
+                }
+            }
+        ],
+        "@typescript-eslint/naming-convention": "error",
+        "@typescript-eslint/prefer-namespace-keyword": "error",
+        "@typescript-eslint/quotes": [
+            "error",
+            "double",
+            {
+                "avoidEscape": true
+            }
+        ],
+        "@typescript-eslint/semi": [
+            "error",
+            "always"
+        ],
+        "@typescript-eslint/type-annotation-spacing": "error",
+        "brace-style": [
+            "error",
+            "1tbs"
+        ],
+        "indent": "off",
+        "jsdoc/check-alignment": "error",
+        "jsdoc/check-indentation": "error",
+        "no-null/no-null": "error",
+        "no-trailing-spaces": "error",
+        "no-var": "error",
+        "prefer-const": "error",
+        "quotes": "off",
+        "semi": "off",
+        "spaced-comment": [
+            "error",
+            "always",
+            {
+                "markers": [
+                    "/"
+                ]
+            }
+        ],
+        "keyword-spacing": ["error", {"before": true, "after": true}],
+        "space-infix-ops": "error",
+        "comma-spacing": ["error", {"before": false, "after": true}],
+        "semi-spacing": ["error", {"before": false, "after": true}]
+    }
+};
