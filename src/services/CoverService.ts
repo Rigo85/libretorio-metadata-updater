@@ -21,16 +21,23 @@ export class CoverService {
 	}
 
 	async downloadAndConvertCover(coverUrl: string, coverId: string): Promise<boolean> {
-		const tempPath = path.join(config.production.paths.tempCovers, `${coverId}.jpg`);
 		const finalPath = path.join(config.production.paths.covers, `${coverId}.webp`);
+
+		if (await fs.pathExists(finalPath)) {
+			logger.info({coverId}, "Cover already exists — skipping download");
+			return false;
+		}
+
+		const tempPath = path.join(config.production.paths.tempCovers, `${coverId}.jpg`);
 
 		try {
 			await this.downloadImage(coverUrl, tempPath);
 			this.convertToWebp(tempPath, finalPath);
 			logger.info({coverId}, "Cover downloaded and converted to webp");
 			return true;
-		} catch (error) {
-			logger.error({coverId, coverUrl, err: error}, "Failed to download/convert cover");
+		} catch (error: any) {
+			const message = error?.message || "Unknown error";
+			logger.error({coverId, coverUrl, message}, "Failed to download/convert cover");
 			return false;
 		}
 	}
