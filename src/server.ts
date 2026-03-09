@@ -10,6 +10,7 @@ import errorHandler from "errorhandler";
 
 import { bootstrap } from "(src)/app";
 import { PostgresAdapter } from "(src)/db/PostgresAdapter";
+import RedisAdapter from "(src)/db/RedisAdapter";
 import { config } from "(src)/config/configuration";
 import { createLogger } from "(src)/helpers/logger";
 
@@ -34,6 +35,7 @@ async function fullServerStart() {
 		try {
 			const dbService = PostgresAdapter.getInstance();
 			await dbService.disconnect();
+			await RedisAdapter.disconnect();
 
 			clearTimeout(forceExit);
 			logger.info("Graceful shutdown completed");

@@ -53,7 +53,7 @@ export class MetadataUpdaterService {
 			// OL requests don't count toward Google's limit, but we use the Google limit
 			// as our batch ceiling since some archives will fall through to Google.
 			const effectiveLimit = tracker.hasKeys()
-				? tracker.getEffectiveLimit()
+				? await tracker.getEffectiveLimit()
 				: 500; // If no Google keys, still process up to 500 via OL only
 			logger.info({effectiveLimit, hasGoogleKeys: tracker.hasKeys()}, "Effective limit calculated");
 
@@ -80,10 +80,13 @@ export class MetadataUpdaterService {
 				logger.info({progress, archiveId: archive.id, searchTitle, name: archive.name}, "Processing archive");
 
 				// Phase 1: Try OpenLibrary
+				let olHadError = false;
 				if (canUseOpenLibrary) {
 					const olResult = await OpenLibraryService.getInstance().searchByTitle(searchTitle);
 
-					if (olResult) {
+					if (olResult === "error") {
+						olHadError = true;
+					} else if (olResult) {
 						const webDetailsJson = JSON.stringify(olResult.webDetails);
 						const updated = await ArchiveRepository.getInstance()
 							.updateWebDetails(archive.id, webDetailsJson);
@@ -107,11 +110,14 @@ export class MetadataUpdaterService {
 				}
 
 				// Phase 2: Try Google Books (if OL returned nothing or disabled)
-				if (tracker.hasKeys() && tracker.getAvailableKey()) {
+				let googleHadError = false;
+				if (tracker.hasKeys() && await tracker.getAvailableKey()) {
 					const googleResult = await GoogleBooksService.getInstance()
 						.searchByTitle(searchTitle, tracker);
 
-					if (googleResult) {
+					if (googleResult === "error") {
+						googleHadError = true;
+					} else if (googleResult) {
 						const webDetailsJson = JSON.stringify(googleResult.webDetails);
 						const updated = await ArchiveRepository.getInstance()
 							.updateWebDetails(archive.id, webDetailsJson);
@@ -136,11 +142,16 @@ export class MetadataUpdaterService {
 					logger.warn("All Google API keys exhausted — skipping remaining Google lookups");
 				}
 
-				// Neither source found anything — increment attempts
-				notFound++;
-				await MetadataLookupControlRepository.getInstance().incrementAttempts(archive.id);
-				const attempts = await MetadataLookupControlRepository.getInstance().getAttempts(archive.id);
-				logger.info({archiveId: archive.id, attempts, maxAttempts, searchTitle}, "No metadata found — attempt recorded");
+				// Only increment attempts when both APIs responded successfully but found nothing.
+				// API errors (429, 503, network failures) should NOT count against the archive.
+				if (olHadError || googleHadError) {
+					logger.info({archiveId: archive.id, searchTitle, olHadError, googleHadError}, "Skipping attempt increment — API error occurred");
+				} else {
+					notFound++;
+					await MetadataLookupControlRepository.getInstance().incrementAttempts(archive.id);
+					const attempts = await MetadataLookupControlRepository.getInstance().getAttempts(archive.id);
+					logger.info({archiveId: archive.id, attempts, maxAttempts, searchTitle}, "No metadata found — attempt recorded");
+				}
 			}
 
 			// Summary
@@ -152,7 +163,7 @@ export class MetadataUpdaterService {
 				notFound,
 				coverDownloads,
 				elapsedSeconds: elapsed,
-				googleUsage: tracker.hasKeys() ? tracker.getUsageSummary() : "no keys"
+				googleUsage: tracker.hasKeys() ? await tracker.getUsageSummary() : "no keys"
 			}, "=== Metadata update completed ===");
 		} catch (error) {
 			logger.error({err: error}, "Metadata update failed");

@@ -22,7 +22,8 @@ export class OpenLibraryService {
 		return OpenLibraryService.instance;
 	}
 
-	async searchByTitle(title: string): Promise<OpenLibraryResult | undefined> {
+	// Returns OpenLibraryResult on match, undefined on no results, "error" on API failure.
+	async searchByTitle(title: string): Promise<OpenLibraryResult | undefined | "error"> {
 		const trimmed = title.trim();
 		if (!trimmed) {
 			return undefined;
@@ -53,7 +54,7 @@ export class OpenLibraryService {
 			const status = error?.response?.status;
 			const message = error?.message || "Unknown error";
 			logger.error({searchTitle: trimmed, status, message}, "OL API error");
-			return undefined;
+			return "error";
 		}
 	}
 }

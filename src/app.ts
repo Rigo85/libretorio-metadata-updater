@@ -9,6 +9,7 @@ import { schedule } from "node-cron";
 import moment from "moment-timezone";
 
 import { MetadataUpdaterService } from "(src)/services/MetadataUpdaterService";
+import RedisAdapter from "(src)/db/RedisAdapter";
 import { config } from "(src)/config/configuration";
 import * as homeController from "(src)/controllers/home";
 import { createLogger } from "(src)/helpers/logger";
@@ -17,6 +18,8 @@ dotenv.config({path: ".env"});
 
 export async function bootstrap(): Promise<express.Express> {
 	const logger = createLogger("App");
+
+	await RedisAdapter.initialize();
 
 	const app = express();
 

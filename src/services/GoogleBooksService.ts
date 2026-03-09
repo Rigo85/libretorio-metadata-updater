@@ -24,8 +24,9 @@ export class GoogleBooksService {
 		return GoogleBooksService.instance;
 	}
 
-	async searchByTitle(title: string, tracker: RequestTracker): Promise<GoogleBooksResult | undefined> {
-		const apiKey = tracker.getAvailableKey();
+	// Returns GoogleBooksResult on match, undefined on no results, "error" on API failure.
+	async searchByTitle(title: string, tracker: RequestTracker): Promise<GoogleBooksResult | undefined | "error"> {
+		const apiKey = await tracker.getAvailableKey();
 		if (!apiKey) {
 			logger.warn("No available Google API key — all exhausted for today");
 			return undefined;
@@ -42,7 +43,7 @@ export class GoogleBooksService {
 		for (let attempt = 0; attempt <= maxRetries; attempt++) {
 			try {
 				if (attempt === 0) {
-					tracker.consumeRequest(apiKey);
+					await tracker.consumeRequest(apiKey);
 				}
 
 				const response = await axios.get(url, {
@@ -77,7 +78,7 @@ export class GoogleBooksService {
 				}
 
 				logger.error({searchTitle: trimmed, status, message}, "Google Books API error");
-				return undefined;
+				return "error";
 			}
 		}
 

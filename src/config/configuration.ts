@@ -6,7 +6,8 @@ dotenv.config({path: ".env"});
 export const config = {
 	production: {
 		db: {
-			databaseUrl: process.env.DATABASE_URL
+			databaseUrl: process.env.DATABASE_URL,
+			redisUrl: process.env.REDIS_URL || "redis://localhost:6379"
 		},
 		server: {
 			port: parseInt(process.env.PORT || "3010"),
