@@ -7,5 +7,6 @@ const transport = process.env.NODE_ENV !== "production"
 export const createLogger = (name: string) => pino({
 	name,
 	level: process.env.LOG_LEVEL || "info",
+	timestamp: pino.stdTimeFunctions.isoTime,
 	transport
 });
