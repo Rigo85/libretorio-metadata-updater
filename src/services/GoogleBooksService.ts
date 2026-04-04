@@ -42,9 +42,7 @@ export class GoogleBooksService {
 
 		for (let attempt = 0; attempt <= maxRetries; attempt++) {
 			try {
-				if (attempt === 0) {
-					await tracker.consumeRequest(apiKey);
-				}
+				await tracker.consumeRequest(apiKey);
 
 				const response = await axios.get(url, {
 					params: {
@@ -69,6 +67,7 @@ export class GoogleBooksService {
 			} catch (error: any) {
 				const status = error?.response?.status;
 				const message = error?.message || "Unknown error";
+				const reasons = this.getErrorReasons(error);
 
 				if (status === 503 && attempt < maxRetries) {
 					const waitMs = (attempt + 1) * 3000;
@@ -77,12 +76,70 @@ export class GoogleBooksService {
 					continue;
 				}
 
-				logger.error({searchTitle: trimmed, status, message}, "Google Books API error");
+				if (this.isRateLimitError(error)) {
+					const cooldownSeconds = await tracker.registerRateLimitHit(apiKey);
+					logger.warn({
+						searchTitle: trimmed,
+						status,
+						message,
+						reasons,
+						cooldownSeconds,
+						apiKey: `${apiKey.substring(0, 8)}...`
+					}, "Google Books rate limited — cooling down key");
+					return "error";
+				}
+
+				if (this.isDailyQuotaExceededError(error)) {
+					await tracker.markKeyExhausted(apiKey, `quota exceeded (${status ?? "unknown status"})`);
+					logger.warn({
+						searchTitle: trimmed,
+						status,
+						message,
+						reasons,
+						apiKey: `${apiKey.substring(0, 8)}...`
+					}, "Google Books daily quota exhausted for key");
+					return "error";
+				}
+
+				logger.error({searchTitle: trimmed, status, message, reasons}, "Google Books API error");
 				return "error";
 			}
 		}
 
 		return undefined;
+	}
+
+	private getErrorReasons(error: any): string[] {
+		return error?.response?.data?.error?.errors?.map((item: any) => item?.reason).filter(Boolean) || [];
+	}
+
+	private isRateLimitError(error: any): boolean {
+		const status = error?.response?.status;
+		if (status === 429) {
+			return true;
+		}
+
+		if (status !== 403) {
+			return false;
+		}
+
+		const reasons = this.getErrorReasons(error);
+		const message = String(error?.response?.data?.error?.message || "").toLowerCase();
+
+		return reasons.some((reason: string) => /rate.?limit/i.test(reason))
+			|| /too many requests|rate limit/.test(message);
+	}
+
+	private isDailyQuotaExceededError(error: any): boolean {
+		if (error?.response?.status !== 403) {
+			return false;
+		}
+
+		const reasons = this.getErrorReasons(error);
+		const message = String(error?.response?.data?.error?.message || "").toLowerCase();
+
+		return reasons.some((reason: string) => /daily.?limit|quota/i.test(reason))
+			|| /daily limit|quota/.test(message);
 	}
 
 	private mapToWebDetails(vi: VolumeInfo): WebDetails {

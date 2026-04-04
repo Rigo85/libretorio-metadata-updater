@@ -36,13 +36,20 @@ export class MetadataUpdaterService {
 		logger.info("=== Metadata update started ===");
 
 		try {
-			const {maxAttempts, googleApiKeys, dailyRequestLimit, requestDelayMs, canUseOpenLibrary} = config.production.metadata;
+			const {
+				maxAttempts,
+				googleApiKeys,
+				dailyRequestLimit,
+				requestSafetyBufferPerKey,
+				requestDelayMs,
+				canUseOpenLibrary
+			} = config.production.metadata;
 
 			// Ensure control table exists
 			await MetadataLookupControlRepository.getInstance().ensureTable();
 
 			// Build request tracker for Google Books keys
-			const tracker = new RequestTracker(googleApiKeys, dailyRequestLimit);
+			const tracker = new RequestTracker(googleApiKeys, dailyRequestLimit, requestSafetyBufferPerKey);
 
 			// Get archive IDs that have exhausted their retry attempts
 			const exhaustedIds = await MetadataLookupControlRepository.getInstance()
@@ -71,6 +78,7 @@ export class MetadataUpdaterService {
 			let googleMatches = 0;
 			let notFound = 0;
 			let coverDownloads = 0;
+			let googleQuotaExhaustedLogged = false;
 
 			for (let i = 0; i < archives.length; i++) {
 				const archive = archives[i];
@@ -111,35 +119,55 @@ export class MetadataUpdaterService {
 
 				// Phase 2: Try Google Books (if OL returned nothing or disabled)
 				let googleHadError = false;
-				if (tracker.hasKeys() && await tracker.getAvailableKey()) {
-					const googleResult = await GoogleBooksService.getInstance()
-						.searchByTitle(searchTitle, tracker);
-
-					if (googleResult === "error") {
-						googleHadError = true;
-					} else if (googleResult) {
-						const webDetailsJson = JSON.stringify(googleResult.webDetails);
-						const updated = await ArchiveRepository.getInstance()
-							.updateWebDetails(archive.id, webDetailsJson);
-
-						if (updated) {
-							googleMatches++;
-							logger.info({archiveId: archive.id, title: googleResult.webDetails.title}, "Google Books metadata saved");
-
-							if (googleResult.coverUrl) {
-								const success = await CoverService.getInstance()
-									.downloadAndConvertCover(googleResult.coverUrl, archive.coverId);
-								if (success) coverDownloads++;
-							}
-
-							await this.delay(requestDelayMs);
-							continue;
+				if (tracker.hasKeys()) {
+					let availableKey = await tracker.getAvailableKey();
+					if (!availableKey) {
+						const waitMs = await tracker.getWaitTimeUntilAvailableKeyMs();
+						if (waitMs && waitMs > 0) {
+							logger.warn({
+								archiveId: archive.id,
+								searchTitle,
+								waitMs
+							}, "All Google API keys are cooling down — waiting before retrying Google Books");
+							await this.delay(waitMs);
+							availableKey = await tracker.getAvailableKey();
 						}
 					}
 
-					await this.delay(requestDelayMs);
-				} else if (tracker.hasKeys()) {
-					logger.warn("All Google API keys exhausted — skipping remaining Google lookups");
+					if (availableKey) {
+						const googleResult = await GoogleBooksService.getInstance()
+							.searchByTitle(searchTitle, tracker);
+
+						if (googleResult === "error") {
+							googleHadError = true;
+						} else if (googleResult) {
+							const webDetailsJson = JSON.stringify(googleResult.webDetails);
+							const updated = await ArchiveRepository.getInstance()
+								.updateWebDetails(archive.id, webDetailsJson);
+
+							if (updated) {
+								googleMatches++;
+								logger.info({archiveId: archive.id, title: googleResult.webDetails.title}, "Google Books metadata saved");
+
+								if (googleResult.coverUrl) {
+									const success = await CoverService.getInstance()
+										.downloadAndConvertCover(googleResult.coverUrl, archive.coverId);
+									if (success) coverDownloads++;
+								}
+
+								await this.delay(requestDelayMs);
+								continue;
+							}
+						}
+
+						await this.delay(requestDelayMs);
+					} else {
+						googleHadError = true;
+						if (!googleQuotaExhaustedLogged) {
+							googleQuotaExhaustedLogged = true;
+							logger.warn({progress, archiveId: archive.id}, "All Google API keys exhausted for today — remaining archives will skip Google Books");
+						}
+					}
 				}
 
 				// Only increment attempts when both APIs responded successfully but found nothing.

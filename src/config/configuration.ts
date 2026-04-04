@@ -23,6 +23,7 @@ export const config = {
 			canUseOpenLibrary: (process.env.CAN_USE_OPENLIBRARY_API || "true").toLowerCase() === "true",
 			googleApiKeys: (process.env.GOOGLE_API_KEYS || "").split(",").map(k => k.trim()).filter(Boolean),
 			dailyRequestLimit: parseInt(process.env.DAILY_REQUEST_LIMIT || "1000"),
+			requestSafetyBufferPerKey: parseInt(process.env.REQUEST_SAFETY_BUFFER_PER_KEY || "100"),
 			maxAttempts: parseInt(process.env.MAX_ATTEMPTS || "3"),
 			requestDelayMs: parseInt(process.env.REQUEST_DELAY_MS || "2000")
 		}
