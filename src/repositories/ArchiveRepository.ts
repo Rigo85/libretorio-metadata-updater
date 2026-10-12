@@ -1,83 +1,64 @@
 import { PostgresAdapter } from "(src)/db/PostgresAdapter";
 import { ArchiveRecord } from "(src)/models/interfaces/Archive";
-import { createLogger } from "(src)/helpers/logger";
-
-const logger = createLogger("ArchiveRepository");
+import { LocalIdentityCorrection } from "(src)/helpers/metadataRecovery";
 
 export class ArchiveRepository {
 	private static instance: ArchiveRepository;
 
-	private constructor() {
-	}
-
 	public static getInstance(): ArchiveRepository {
-		if (!ArchiveRepository.instance) {
-			ArchiveRepository.instance = new ArchiveRepository();
-		}
-		return ArchiveRepository.instance;
+		return ArchiveRepository.instance ??= new ArchiveRepository();
 	}
 
-	async getArchivesNeedingMetadata(excludeIds: number[], limit: number): Promise<ArchiveRecord[]> {
-		logger.info({excludeCount: excludeIds.length, limit}, "Querying archives needing metadata");
-
-		try {
-			let query: string;
-			let values: any[];
-
-			if (excludeIds.length > 0) {
-				query = `
-					SELECT id, name, "coverId", "localDetails", "webDetails", "customDetails"
-					FROM archive
-					WHERE "webDetails" IS NULL
-					  AND "customDetails" = false
-					  AND id NOT IN (${excludeIds.map((_, i) => `$${i + 1}`).join(", ")})
-					ORDER BY id ASC
-					LIMIT $${excludeIds.length + 1}
-				`;
-				values = [...excludeIds, limit];
-			} else {
-				query = `
-					SELECT id, name, "coverId", "localDetails", "webDetails", "customDetails"
-					FROM archive
-					WHERE "webDetails" IS NULL
-					  AND "customDetails" = false
-					ORDER BY id ASC
-					LIMIT $1
-				`;
-				values = [limit];
-			}
-
-			const rows = await PostgresAdapter.getInstance().query(query, values);
-			return rows || [];
-		} catch (error) {
-			logger.error({err: error}, "Error querying archives needing metadata");
-			return [];
-		}
+	async getArchivesNeedingMetadata(maxAttempts: number, limit: number, afterId: number,
+		selection?: {ids: number[]; includeExhausted: boolean}): Promise<ArchiveRecord[]> {
+		if (selection?.includeExhausted && !selection.ids.length) throw new Error("Exhausted preview requires IDs");
+		return PostgresAdapter.getInstance().query(`
+			SELECT a.id, a.name, a."coverId", a."localDetails", a."webDetails", a."customDetails",
+			  md5(ROW(a.name,a."coverId",a."localDetails")::text) AS "sourceFingerprint"
+			FROM archive a
+			WHERE a."webDetails" IS NULL AND a."customDetails" = false AND a.id > $1
+			  AND (cardinality($4::int[]) = 0 OR a.id = ANY($4::int[]))
+			  AND ($5::boolean OR NOT EXISTS (
+				SELECT 1 FROM metadata_lookup_control c
+				WHERE c.archive_id = a.id AND c.attempts >= $2
+			  ))
+			ORDER BY a.id ASC LIMIT $3
+		`, [afterId, maxAttempts, limit, selection?.ids ?? [], selection?.includeExhausted ?? false]);
 	}
 
-	async updateWebDetails(archiveId: number, webDetails: string): Promise<boolean> {
-		logger.info({archiveId}, "Updating webDetails");
-
-		try {
-			const query = `
-				UPDATE archive
-				SET "webDetails" = $1
-				WHERE id = $2
-				  AND "customDetails" = false
-				RETURNING id
-			`;
-			const values = [webDetails, archiveId];
-			const rows = await PostgresAdapter.getInstance().query(query, values);
-
-			if (!rows?.length) {
-				logger.warn({archiveId}, "Update returned no rows — archive may have customDetails=true");
-				return false;
-			}
-
-			return true;
-		} catch (error) {
-			logger.error({archiveId, err: error}, "Error updating webDetails");
-			return false;
+	private correctionPatch(correction: LocalIdentityCorrection): string {
+		if (correction.provider !== "google" || correction.evidence !== "google-isbn-confirmed-field-swap" ||
+			!correction.isbn || !/^[A-Za-z0-9_-]{1,120}$/.test(correction.providerId ?? "")) {
+			throw new Error("Local identity correction requires verified Google provenance");
 		}
+		// eslint-disable-next-line @typescript-eslint/naming-convention -- Preserve Calibre's local metadata field.
+		return JSON.stringify({title: correction.title, "author(s)": correction.author,
+			_identityCorrection: {version: 1, ...correction, correctedAt: new Date().toISOString()}});
+	}
+
+	async updateLocalIdentity(archiveId: number, correction: LocalIdentityCorrection, sourceFingerprint: string): Promise<string | undefined> {
+		if (!sourceFingerprint) return undefined;
+		const rows = await PostgresAdapter.getInstance().query(`
+			UPDATE archive SET "localDetails" = "localDetails" || $1::jsonb
+			WHERE id = $2 AND "customDetails" = false AND "webDetails" IS NULL
+			  AND md5(ROW(name,"coverId","localDetails")::text) = $3
+			  AND jsonb_typeof("localDetails") = 'object' AND NOT ("localDetails" ? '_identityCorrection')
+			RETURNING md5(ROW(name,"coverId","localDetails")::text) AS "sourceFingerprint"
+		`, [this.correctionPatch(correction), archiveId, sourceFingerprint]);
+		return rows[0]?.sourceFingerprint;
+	}
+
+	async updateWebDetails(archiveId: number, webDetails: string, sourceFingerprint?: string, correction?: LocalIdentityCorrection): Promise<boolean> {
+		if (correction && !sourceFingerprint) return false;
+		// A user or another service may have edited this row during HTTP lookup.
+		const rows = await PostgresAdapter.getInstance().query(`
+			UPDATE archive SET "webDetails" = $1,
+			  "localDetails" = CASE WHEN $4::jsonb IS NULL THEN "localDetails" ELSE "localDetails" || $4::jsonb END
+			WHERE id = $2 AND "customDetails" = false AND "webDetails" IS NULL
+			  AND ($3::text IS NULL OR md5(ROW(name,"coverId","localDetails")::text) = $3)
+			  AND ($4::jsonb IS NULL OR (jsonb_typeof("localDetails") = 'object' AND NOT ("localDetails" ? '_identityCorrection')))
+			RETURNING id
+		`, [webDetails, archiveId, sourceFingerprint, correction ? this.correctionPatch(correction) : undefined]);
+		return rows.length > 0;
 	}
 }

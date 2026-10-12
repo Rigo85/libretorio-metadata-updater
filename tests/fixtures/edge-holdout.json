@@ -1,0 +1,197 @@
+[
+  {
+    "id": 73368,
+    "name": "Jack Campbell La Flota Perdida 02 Impavido.epub",
+    "localDetails": {
+      "title": "La Flota Perdida 02 Impávido",
+      "author(s)": "Jack Campbell",
+      "identifiers": "isbn:9788498005684",
+      "languages": "spa",
+      "series": "La Flota Perdida #2"
+    },
+    "group": "isbn"
+  },
+  {
+    "id": 139877,
+    "name": "GP Hudson Crónicas de Pike 12.5 Invencible historia corta.epub",
+    "localDetails": {
+      "title": "Crónicas de Pike 12.5 Invencible",
+      "author(s)": "GP Hudson [GP Hudson]",
+      "identifiers": "isbn:9781990547300",
+      "languages": "spa"
+    },
+    "group": "isbn"
+  },
+  {
+    "id": 73048,
+    "name": "Iain M. Banks La Cultura 05 Inversiones.epub",
+    "localDetails": {
+      "title": "Inversiones",
+      "author(s)": "Iain M. Banks [Banks, Iain M.]",
+      "identifiers": "isbn:9788498002720",
+      "languages": "spa",
+      "series": "La Cultura #6"
+    },
+    "group": "isbn"
+  },
+  {
+    "id": 73792,
+    "name": "Joe Abercrombie El mar Quebrado 01 Medio rey.epub",
+    "localDetails": {
+      "title": "El mar Quebrado 01 Medio rey",
+      "author(s)": "Joe Abercrombie [Joe Abercrombie]",
+      "identifiers": "isbn:9788415831747, mobi-asin:B00VIUG6A4",
+      "languages": "spa"
+    },
+    "group": "isbn"
+  },
+  {
+    "id": 71539,
+    "name": "Cixin Liu Aguantar el cielo.epub",
+    "localDetails": {
+      "title": "Aguantar el cielo",
+      "author(s)": "Cixin Liu [Cixin Liu]",
+      "identifiers": "isbn:9781838937638",
+      "languages": "spa"
+    },
+    "group": "isbn"
+  },
+  {
+    "id": 87978,
+    "name": "LIBRO IV Liber ABA - Aleister Crowley(2).pdf",
+    "localDetails": {
+      "title": "PREFACIO DE LAS PARTES I Y II",
+      "author(s)": "PERSONAL"
+    },
+    "group": "roman-volume"
+  },
+  {
+    "id": 70757,
+    "name": "Antologia De Anticipacion 20 Varios Autores.epub",
+    "localDetails": {
+      "title": "(Anticipación 20) Antología De Novelas De Anticipación XX",
+      "author(s)": "Varios Autores [Autores, Varios]",
+      "languages": "spa"
+    },
+    "group": "roman-volume"
+  },
+  {
+    "id": 97661,
+    "name": "Sheckley, Robert - Paraiso II.pdf",
+    "localDetails": {
+      "title": "Microsoft Word - Paraiso II.doc",
+      "author(s)": "Administrador"
+    },
+    "group": "roman-volume"
+  },
+  {
+    "id": 86999,
+    "name": "7 - AA.VV. Antología Palatina I.epub",
+    "localDetails": {
+      "title": "Antología Palatina I. Epigramas helenísticos (Biblioteca Clásica Gredos)",
+      "author(s)": "Varios Autores [Autores, Varios]",
+      "identifiers": "mobi-asin:B01H1WRIH2",
+      "languages": "spa"
+    },
+    "group": "roman-volume"
+  },
+  {
+    "id": 84005,
+    "name": "respuestas-san-marcos-2016-i.pdf",
+    "localDetails": {
+      "title": "respuestas-san-marcos-2016-i",
+      "author(s)": "Unknown"
+    },
+    "group": "roman-volume"
+  },
+  {
+    "id": 132701,
+    "name": "OMP_2015_Nível_III_Prova_1_1ª_Fase_EM_e_PV_3º_Ano_Resoluções.pdf",
+    "localDetails": {
+      "title": "1ª fase - N3 OMP - Resolução - EM e PV.indd",
+      "author(s)": "Unknown"
+    },
+    "group": "no-author"
+  },
+  {
+    "id": 136351,
+    "name": "Logica-Algebra-Boole-M3.pdf",
+    "localDetails": {
+      "title": "Untitled",
+      "author(s)": "Unknown"
+    },
+    "group": "no-author"
+  },
+  {
+    "id": 136568,
+    "name": "EloraculodelafortunaOphiel.pdf",
+    "localDetails": {
+      "title": "EloraculodelafortunaOphiel",
+      "author(s)": "Administrador"
+    },
+    "group": "no-author"
+  },
+  {
+    "id": 133022,
+    "name": "Aula 09 - Grafos 1.pdf",
+    "localDetails": {
+      "title": "()",
+      "author(s)": "()"
+    },
+    "group": "no-author"
+  },
+  {
+    "id": 94812,
+    "name": "Zelazny, Roger - A5, Las Cortes del Caos.pdf",
+    "localDetails": {
+      "title": "Microsoft Word - Las cortes del caos.doc",
+      "author(s)": "Administrador"
+    },
+    "group": "no-author"
+  },
+  {
+    "id": 88096,
+    "name": "kupdf.net_los-bere-de-alexandreeleazar.pdf",
+    "localDetails": {
+      "title": "Sin título 2",
+      "author(s)": "Stallo Alessandro"
+    },
+    "group": "other"
+  },
+  {
+    "id": 81128,
+    "name": "Clio Biografias N° 05 - Julio 2015.pdf",
+    "localDetails": {
+      "title": "Untitled",
+      "author(s)": "Julio 2015"
+    },
+    "group": "other"
+  },
+  {
+    "id": 92755,
+    "name": "Moore, Robert - Como timbres de alarma.pdf",
+    "localDetails": {
+      "title": "Robert Moore Williams - Como timbres de alarma",
+      "author(s)": "Como timbres de alarma"
+    },
+    "group": "other"
+  },
+  {
+    "id": 94391,
+    "name": "Valera Cid, Eduardo - Valera Cid, Eduardo.pdf",
+    "localDetails": {
+      "title": "VPT040",
+      "author(s)": "Valera Cid, Eduardo"
+    },
+    "group": "other"
+  },
+  {
+    "id": 77049,
+    "name": "Varios autores Revista SCI FDI 01.pdf",
+    "localDetails": {
+      "title": "Sci-FdI",
+      "author(s)": "Equipo editorial Sci-FdI"
+    },
+    "group": "other"
+  }
+]

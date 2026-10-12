@@ -1,8 +1,9 @@
 export interface ArchiveRecord {
 	id: number;
+	sourceFingerprint?: string;
 	name: string;
 	coverId: string;
-	localDetails: string | undefined;
+	localDetails: unknown;
 	webDetails: string | undefined;
 	customDetails: boolean;
 }

@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/naming-convention -- These fields preserve the external OpenLibrary JSON contract. */
 // Represents the webDetails JSON structure stored in the archive table.
 // Follows the OpenLibrary search response format so the frontend can
 // consume metadata from both OL and Google Books uniformly.
@@ -20,4 +21,7 @@ export interface WebDetails {
 	cover_edition_key?: string;
 	// source indicator — not present in OL responses, used to identify Google Books origin
 	_source?: string;
+	// Provider record identifier for tracing a lookup, not a quality certificate.
+	_providerId?: string;
+	_metadataScope?: "work" | "edition";
 }

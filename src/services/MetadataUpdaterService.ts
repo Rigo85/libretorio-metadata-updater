@@ -1,12 +1,12 @@
 import { config } from "(src)/config/configuration";
 import { ArchiveRepository } from "(src)/repositories/ArchiveRepository";
 import { MetadataLookupControlRepository } from "(src)/repositories/MetadataLookupControlRepository";
-import { OpenLibraryService } from "(src)/services/OpenLibraryService";
-import { GoogleBooksService } from "(src)/services/GoogleBooksService";
+import { RecoveryLookupService } from "(src)/services/RecoveryLookupService";
+import { MetadataRunState } from "(src)/services/MetadataRunState";
 import { CoverService } from "(src)/services/CoverService";
 import { RequestTracker } from "(src)/services/RequestTracker";
-import { ArchiveRecord } from "(src)/models/interfaces/Archive";
-import { cleanFilename, cleanTitle } from "(src)/helpers/fileUtils";
+import { resolveMetadataSearch } from "(src)/helpers/metadataTitle";
+import { resolveMetadataAuthor } from "(src)/helpers/metadataCandidate";
 import { createLogger } from "(src)/helpers/logger";
 
 const logger = createLogger("MetadataUpdaterService");
@@ -15,209 +15,167 @@ export class MetadataUpdaterService {
 	private static instance: MetadataUpdaterService;
 	private running = false;
 
-	private constructor() {
-	}
-
 	public static getInstance(): MetadataUpdaterService {
-		if (!MetadataUpdaterService.instance) {
-			MetadataUpdaterService.instance = new MetadataUpdaterService();
-		}
-		return MetadataUpdaterService.instance;
+		return MetadataUpdaterService.instance ??= new MetadataUpdaterService();
 	}
 
 	async runUpdate(): Promise<void> {
+		const settings = config.production.metadata;
+		if (settings.mode !== "preview" && settings.mode !== "write") {
+			logger.info("Metadata updater paused; no queries or writes");
+			return;
+		}
 		if (this.running) {
 			logger.warn("Metadata update already running, skipping");
 			return;
 		}
-
 		this.running = true;
 		const startTime = Date.now();
-		logger.info("=== Metadata update started ===");
-
+		const preview = settings.mode === "preview";
+		const summary = {processed: 0, olMatches: 0, googleMatches: 0, notFound: 0,
+			rejected: 0, deferred: 0, insufficient: 0, insufficientAttempts: 0, invalidTitle: 0, changedMeanwhile: 0, coverDownloads: 0,
+			coverFailedOrExisting: 0, httpFailures: 0, limitedLookups: 0, identityUnverified: 0,
+			previewMatches: 0, previewNotFound: 0, localCorrections: 0, previewLocalCorrections: 0, requests: 0};
+		const gate = {
+			available: () => summary.requests < settings.maxRequestsPerRun,
+			record: () => {
+				if (summary.requests >= settings.maxRequestsPerRun) return false;
+				summary.requests++;
+				return true;
+			}
+		};
+		let completed = false;
+		let runState: MetadataRunState | undefined;
+		logger.info({mode: settings.mode, archiveIds: settings.archiveIds,
+			maxArchives: settings.maxArchivesPerRun, maxRequests: settings.maxRequestsPerRun}, "=== Metadata update started ===");
 		try {
-			const {
-				maxAttempts,
-				googleApiKeys,
-				dailyRequestLimit,
-				requestSafetyBufferPerKey,
-				requestDelayMs,
-				canUseOpenLibrary
-			} = config.production.metadata;
-
-			// Ensure control table exists
-			await MetadataLookupControlRepository.getInstance().ensureTable();
-
-			// Build request tracker for Google Books keys
-			const tracker = new RequestTracker(googleApiKeys, dailyRequestLimit, requestSafetyBufferPerKey);
-
-			// Get archive IDs that have exhausted their retry attempts
-			const exhaustedIds = await MetadataLookupControlRepository.getInstance()
-				.getExhaustedArchiveIds(maxAttempts);
-			logger.info({exhaustedCount: exhaustedIds.length, maxAttempts}, "Exhausted archives filtered");
-
-			// Calculate how many archives to fetch.
-			// OL requests don't count toward Google's limit, but we use the Google limit
-			// as our batch ceiling since some archives will fall through to Google.
-			const effectiveLimit = tracker.hasKeys()
-				? await tracker.getEffectiveLimit()
-				: 500; // If no Google keys, still process up to 500 via OL only
-			logger.info({effectiveLimit, hasGoogleKeys: tracker.hasKeys()}, "Effective limit calculated");
-
-			// Fetch archives needing metadata
-			const archives = await ArchiveRepository.getInstance()
-				.getArchivesNeedingMetadata(exhaustedIds, effectiveLimit);
-			logger.info({count: archives.length}, "Archives to process");
-
-			if (archives.length === 0) {
-				logger.info("No archives need metadata — done");
+			const {maxAttempts, googleApiKeys, dailyRequestLimit, requestSafetyBufferPerKey,
+				requestDelayMs, canUseOpenLibrary, batchSize} = config.production.metadata;
+			if (!canUseOpenLibrary && googleApiKeys.length === 0) {
+				logger.warn("No metadata providers enabled; attempts are unchanged");
+				completed = true;
 				return;
 			}
-
-			let olMatches = 0;
-			let googleMatches = 0;
-			let notFound = 0;
-			let coverDownloads = 0;
-			let googleQuotaExhaustedLogged = false;
-
-			for (let i = 0; i < archives.length; i++) {
-				const archive = archives[i];
-				const progress = `${i + 1}/${archives.length}`;
-				const searchTitle = this.getSearchTitle(archive);
-
-				logger.info({progress, archiveId: archive.id, searchTitle, name: archive.name}, "Processing archive");
-
-				// Phase 1: Try OpenLibrary
-				let olHadError = false;
-				if (canUseOpenLibrary) {
-					const olResult = await OpenLibraryService.getInstance().searchByTitle(searchTitle);
-
-					if (olResult === "error") {
-						olHadError = true;
-					} else if (olResult) {
-						const webDetailsJson = JSON.stringify(olResult.webDetails);
-						const updated = await ArchiveRepository.getInstance()
-							.updateWebDetails(archive.id, webDetailsJson);
-
-						if (updated) {
-							olMatches++;
-							logger.info({archiveId: archive.id, title: olResult.webDetails.title}, "OL metadata saved");
-
-							if (olResult.coverUrl) {
-								const success = await CoverService.getInstance()
-									.downloadAndConvertCover(olResult.coverUrl, archive.coverId);
-								if (success) coverDownloads++;
-							}
-
-							await this.delay(requestDelayMs);
+			const control = MetadataLookupControlRepository.getInstance();
+			const repository = ArchiveRepository.getInstance();
+			if (!preview) {
+				runState = new MetadataRunState(!settings.archiveIds.length);
+				await runState.open();
+				await control.ensureTable();
+			}
+			const tracker = new RequestTracker(googleApiKeys, dailyRequestLimit, requestSafetyBufferPerKey);
+			// Google quota must not prevent enabled OpenLibrary from serving the same run.
+			const effectiveLimit = settings.maxArchivesPerRun;
+			const lookupService = new RecoveryLookupService(tracker, gate, {requestDelayMs, canUseOpenLibrary,
+				diagnostics: settings.archiveIds.length > 0});
+			let afterId = runState?.afterId ?? 0;
+			let wrapped = false;
+			while (summary.processed < effectiveLimit && gate.available()) {
+				const archives = await repository.getArchivesNeedingMetadata(maxAttempts,
+					Math.min(batchSize, effectiveLimit - summary.processed), afterId,
+					{ids: settings.archiveIds, includeExhausted: preview || settings.retryExhausted});
+				if (!archives.length) {
+					if (runState) await runState.advance(0);
+					if (!wrapped && afterId > 0 && summary.processed === 0) {
+						afterId = 0; wrapped = true; continue;
+					}
+					break;
+				}
+				for (const archive of archives) {
+					if (!gate.available()) break;
+					afterId = archive.id;
+					summary.processed++;
+					let failed = false;
+					try {
+						const {title: resolvedTitle} = resolveMetadataSearch(archive.name,
+							archive.localDetails, resolveMetadataAuthor(archive.localDetails));
+						const searchTitle = resolvedTitle.title;
+						logger.info({archiveId: archive.id, searchTitle, name: archive.name,
+							searchTitleSource: resolvedTitle.source, searchTitleReason: resolvedTitle.reason}, "Processing archive");
+						if (!searchTitle || searchTitle.length > 500) {
+							summary.invalidTitle++;
 							continue;
 						}
-					}
-
-					await this.delay(requestDelayMs);
-				}
-
-				// Phase 2: Try Google Books (if OL returned nothing or disabled)
-				let googleHadError = false;
-				if (tracker.hasKeys()) {
-					let availableKey = await tracker.getAvailableKey();
-					if (!availableKey) {
-						const waitMs = await tracker.getWaitTimeUntilAvailableKeyMs();
-						if (waitMs && waitMs > 0) {
-							logger.warn({
-								archiveId: archive.id,
-								searchTitle,
-								waitMs
-							}, "All Google API keys are cooling down — waiting before retrying Google Books");
-							await this.delay(waitMs);
-							availableKey = await tracker.getAvailableKey();
-						}
-					}
-
-					if (availableKey) {
-						const googleResult = await GoogleBooksService.getInstance()
-							.searchByTitle(searchTitle, tracker);
-
-						if (googleResult === "error") {
-							googleHadError = true;
-						} else if (googleResult) {
-							const webDetailsJson = JSON.stringify(googleResult.webDetails);
-							const updated = await ArchiveRepository.getInstance()
-								.updateWebDetails(archive.id, webDetailsJson);
-
-							if (updated) {
-								googleMatches++;
-								logger.info({archiveId: archive.id, title: googleResult.webDetails.title}, "Google Books metadata saved");
-
-								if (googleResult.coverUrl) {
-									const success = await CoverService.getInstance()
-										.downloadAndConvertCover(googleResult.coverUrl, archive.coverId);
-									if (success) coverDownloads++;
+						const lookup = await lookupService.search(archive);
+						summary.httpFailures += lookup.errors;
+						if (lookup.limited) summary.limitedLookups++;
+						if (lookup.minimal) summary.insufficient++;
+						if (lookup.identityUnverified) summary.identityUnverified++;
+						const result = lookup.match, provider = lookup.provider;
+						const hadError = lookup.status === "deferred", hadRejected = lookup.rejected;
+						if (hadRejected) summary.rejected++;
+						const correction = lookup.localCorrection;
+						let fingerprint = archive.sourceFingerprint;
+						if (correction) {
+							if (preview) {
+								summary.previewLocalCorrections++;
+								logger.info({archiveId: archive.id, correction}, "Preview local identity correction; no data saved");
+							} else if (lookup.status !== "match" || !result) {
+								fingerprint = await repository.updateLocalIdentity(archive.id, correction, fingerprint);
+								if (!fingerprint) {
+									summary.changedMeanwhile++; continue;
 								}
-
-								await this.delay(requestDelayMs);
-								continue;
+								summary.localCorrections++;
+								logger.info({archiveId: archive.id, evidence: correction.evidence}, "Local identity corrected; enrichment remains pending");
 							}
 						}
-
-						await this.delay(requestDelayMs);
-					} else {
-						googleHadError = true;
-						if (!googleQuotaExhaustedLogged) {
-							googleQuotaExhaustedLogged = true;
-							logger.warn({progress, archiveId: archive.id}, "All Google API keys exhausted for today — remaining archives will skip Google Books");
+						if (lookup.status === "match" && result) {
+							if (preview) {
+								summary.previewMatches++;
+								logger.info({archiveId: archive.id, provider, providerId: result.webDetails._providerId,
+									evidence: lookup.evidence, title: result.webDetails.title, metadataScope: result.webDetails._metadataScope}, "Preview candidate; no metadata or cover saved");
+								continue;
+							}
+							const updated = await repository.updateWebDetails(archive.id, JSON.stringify(result.webDetails), fingerprint, correction);
+							if (!updated) {
+								summary.changedMeanwhile++; continue;
+							}
+							if (provider === "ol") summary.olMatches++;
+							else summary.googleMatches++;
+							if (correction) summary.localCorrections++;
+							logger.info({archiveId: archive.id, provider, providerId: result.webDetails._providerId,
+								evidence: lookup.evidence, title: result.webDetails.title, metadataScope: result.webDetails._metadataScope,
+								localCorrection: correction?.evidence}, "Metadata saved");
+							if (result.coverUrl) {
+								const success = await CoverService.getInstance().downloadAndConvertCover(result.coverUrl, archive.coverId);
+								if (success) summary.coverDownloads++;
+								else summary.coverFailedOrExisting++;
+							}
+						} else if (hadError) {
+							summary.deferred++;
+							logger.info({archiveId: archive.id, minimal: !!lookup.minimal, identityUnverified: !!lookup.identityUnverified}, "Search incomplete; attempts unchanged");
+						} else if (preview) {
+							if (!lookup.minimal && !lookup.identityUnverified) summary.previewNotFound++;
+							else logger.info({archiveId: archive.id, identityUnverified: !!lookup.identityUnverified}, "Preview insufficient metadata; no metadata, cover or attempt saved");
+						} else {
+							const attempts = await control.incrementAttempts(archive.id, maxAttempts, fingerprint);
+							if (attempts === undefined) summary.changedMeanwhile++;
+							else if (lookup.minimal || lookup.identityUnverified) summary.insufficientAttempts++;
+							else summary.notFound++;
+							logger.info({archiveId: archive.id, attempts, hadRejected, minimal: !!lookup.minimal,
+								identityUnverified: !!lookup.identityUnverified}, "No publishable metadata");
 						}
+					} catch (error) {
+						failed = true; throw error;
+					} finally {
+						if (runState && !failed) await runState.advance(afterId);
 					}
 				}
-
-				// Only increment attempts when both APIs responded successfully but found nothing.
-				// API errors (429, 503, network failures) should NOT count against the archive.
-				if (olHadError || googleHadError) {
-					logger.info({archiveId: archive.id, searchTitle, olHadError, googleHadError}, "Skipping attempt increment — API error occurred");
-				} else {
-					notFound++;
-					await MetadataLookupControlRepository.getInstance().incrementAttempts(archive.id);
-					const attempts = await MetadataLookupControlRepository.getInstance().getAttempts(archive.id);
-					logger.info({archiveId: archive.id, attempts, maxAttempts, searchTitle}, "No metadata found — attempt recorded");
-				}
 			}
-
-			// Summary
-			const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-			logger.info({
-				processed: archives.length,
-				olMatches,
-				googleMatches,
-				notFound,
-				coverDownloads,
-				elapsedSeconds: elapsed,
-				googleUsage: tracker.hasKeys() ? await tracker.getUsageSummary() : "no keys"
-			}, "=== Metadata update completed ===");
+			logger.info({googleUsage: tracker.hasKeys() ? await tracker.getUsageSummary() : "no keys"}, "Google usage");
+			completed = true;
 		} catch (error) {
-			logger.error({err: error}, "Metadata update failed");
+			logger.error({err: error}, "Metadata update failed; remaining archives untouched");
 		} finally {
+			try {
+				await runState?.close();
+			} catch (error) {
+				completed = false; logger.error({err: error}, "Could not release metadata lock");
+			}
+			logger.info({...summary, mode: settings.mode, completed, requestLimitReached: !gate.available(),
+				elapsedSeconds: (Date.now() - startTime) / 1000}, "=== Metadata update summary ===");
 			this.running = false;
 		}
 	}
 
-	private getSearchTitle(archive: ArchiveRecord): string {
-		// Try calibre title from localDetails first
-		if (archive.localDetails) {
-			try {
-				const local = JSON.parse(archive.localDetails);
-				if (local.title && local.title.trim()) {
-					return cleanTitle(local.title);
-				}
-			} catch {
-				// localDetails is not valid JSON — fall through to filename
-			}
-		}
-
-		// Fallback to cleaned filename
-		return cleanFilename(archive.name);
-	}
-
-	private delay(ms: number): Promise<void> {
-		return new Promise(resolve => setTimeout(resolve, ms));
-	}
 }

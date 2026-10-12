@@ -13,6 +13,9 @@ export const checkParameter = async (req: Request, res: Response, next: NextFunc
 	const action = req.params.action || req.query.action;
 
 	if (action === config.production.metadata.action) {
+		if (config.production.metadata.mode === "paused") {
+			return res.status(409).json({message: "Metadata updater paused", success: false});
+		}
 		try {
 			MetadataUpdaterService
 				.getInstance()

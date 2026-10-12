@@ -39,7 +39,7 @@ export async function bootstrap(): Promise<express.Express> {
 	app.get("/", homeController.index);
 	app.get("/check/:action", homeController.checkParameter);
 
-	schedule(
+	if (config.production.metadata.mode === "write") schedule(
 		config.production.metadata.cron,
 		async () => {
 			logger.info(`Executing metadata update cron at ${moment(new Date()).tz("America/Lima").format("LLLL")}`);
@@ -55,7 +55,8 @@ export async function bootstrap(): Promise<express.Express> {
 		}
 	);
 
-	logger.info({cron: config.production.metadata.cron}, "Cron scheduled");
+	logger.info({cron: config.production.metadata.cron, mode: config.production.metadata.mode},
+		config.production.metadata.mode === "write" ? "Cron scheduled" : "Cron disabled; manual preview or paused");
 
 	return app;
 }

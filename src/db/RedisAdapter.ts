@@ -27,6 +27,7 @@ class RedisAdapter {
 		this.initPromise = new Promise<RedisClientType>((resolve, reject) => {
 			try {
 				this.client = createClient({
+					disableOfflineQueue: true,
 					url: config.production.db.redisUrl
 				});
 
