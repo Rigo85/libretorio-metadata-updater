@@ -1,5 +1,7 @@
 import { WebDetails } from "../models/interfaces/OpenLibrary";
 
+const creditSeparator = /\s+(?:y|and|&)\s+|\s*;\s*/i;
+
 function tokens(text: string): string[] {
 	return text.normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
 }
@@ -40,8 +42,9 @@ export function resolveMetadataAuthor(details: unknown): string | undefined {
 	const value = (details as Record<string, unknown>)["author(s)"];
 	if (typeof value !== "string" || value.length > 300) return undefined;
 	const cleaned = value.replace(/\s*\[([^\]]+)\]\s*$/, (bracket, contents: string, offset: number) => {
-		const outer = tokens(value.slice(0, offset)).sort().join(" ");
-		return outer === tokens(contents).sort().join(" ") ? "" : bracket;
+		const outer = value.slice(0, offset);
+		const annotation = tokens(contents).sort().join(" ");
+		return [outer, ...outer.split(creditSeparator)].some(credit => tokens(credit).sort().join(" ") === annotation) ? "" : bracket;
 	}).trim();
 	const normalized = tokens(cleaned).join(" ");
 	if (/^(?:usuario|user|utilisateur|benutzer)(?: de| del| of)? (?:microsoft )?windows(?: \d+| xp| vista)?$/.test(normalized)) return undefined;
@@ -96,6 +99,33 @@ function compatibleCredit(query: string, result: string): boolean {
 	return compatibleAuthor(left, right);
 }
 
+function corroboratedCommaCredits(author: string, authors: string[]): boolean | undefined {
+	// Commas may mean surname-first, not coauthors. Only distinct provider credits
+	// can corroborate this fallback, and every complete local name must be covered.
+	if (!author.includes(",")) return undefined;
+	if (author.length > 300 || authors.length > 16) return false;
+	const groups = author.split(creditSeparator).flatMap(group => group.split(",")).map(group => group.trim());
+	if (groups.length < 2 || groups.length > 8) return false;
+	if (groups.some(group => !/^[\p{L}\p{M} .'-]+$/u.test(group) || nameTokens(group).filter(part => part.length > 1).length < 2)) return undefined;
+	// Preserve a compound surname-first credit when the provider gives that exact order.
+	if (author.split(creditSeparator).length === 1 && groups.length === 2 &&
+		authors.some(name => nameTokens(name).join(" ") === nameTokens(author).join(" "))) return true;
+	const owners = new Map<number, number>();
+	const assign = (index: number, visited: Set<number>): boolean => {
+		for (let i = 0; i < authors.length; i++) {
+			if (visited.has(i) || authors[i].length > 300 || !compatibleCredit(groups[index], authors[i]) || !compatibleCredit(authors[i], groups[index])) continue;
+			visited.add(i);
+			const previous = owners.get(i);
+			if (previous === undefined || assign(previous, visited)) {
+				owners.set(i, index);
+				return true;
+			}
+		}
+		return false;
+	};
+	return groups.every((_, index) => assign(index, new Set()));
+}
+
 export function metadataCandidateRejection(title: string, author: string | undefined, candidate: WebDetails): string | undefined {
 	const queryParts = titleTokens(title);
 	const query = new Set(queryParts);
@@ -110,11 +140,12 @@ export function metadataCandidateRejection(title: string, author: string | undef
 	const common = [...query].filter(token => result.has(token)).length;
 	if (common / query.size < 0.8 || common / result.size < 0.8) return "title-mismatch";
 	if (author) {
-		const groups = author.split(/\s+(?:y|and|&)\s+|\s*;\s*/i);
+		const groups = author.split(creditSeparator);
 		if (!groups.length || groups.some(group => !nameTokens(group).some(part => part.length > 1))) return "insufficient-author";
 		if (!Array.isArray(candidate.author_name) || !candidate.author_name.length) return "missing-author";
 		const authors = candidate.author_name.filter(value => typeof value === "string");
-		if (!groups.every(group => authors.some(name => compatibleCredit(group, name)))) return "author-mismatch";
+		const commaMatch = corroboratedCommaCredits(author, authors);
+		if (!(commaMatch ?? groups.every(group => authors.some(name => compatibleCredit(group, name))))) return "author-mismatch";
 	}
 	return undefined;
 }

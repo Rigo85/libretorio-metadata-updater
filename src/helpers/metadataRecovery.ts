@@ -217,6 +217,17 @@ export function buildPlan(row: {name: string; localDetails: unknown}, titleHelpe
 			if (tasks.length > before) selected.push(tasks[tasks.length - 1]);
 		}
 	}
+	const copyTitle = titleHelper.fileCopyTitleVariant(base.title.source === "localDetails" ? details.title : row.name);
+	if (copyTitle && selected.length < 14 && hypotheses.length < 6 && !hypotheses.some(h => signature(h.title) === signature(copyTitle))) {
+		// Removing a copy label helps retrieval, but cannot itself prove identity.
+		hypotheses.push({title:copyTitle, author:hypotheses[0]?.author, evidence:"file-copy-marker-isbn-only", queryOnly:true, validationOnly:true});
+		for (const provider of ["google", "openlibrary"] as const) {
+			if (selected.length >= 14) break;
+			const before = tasks.length;
+			push(provider, copyTitle, hypotheses[0]?.author, false, "file-copy-marker");
+			if (tasks.length > before) selected.push(tasks[tasks.length - 1]);
+		}
+	}
 	// Keep the existing request order when the complete plan fits in the budget.
 	return {base, hypotheses, isbns, notes, tasks:tasks.filter(task => selected.includes(task))};
 }

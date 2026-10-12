@@ -6,6 +6,13 @@ export function cleanSearchSource(value: string): string {
 		.replace(/\.(?:indd|docx?|pptx?|xlsx?|pdf|epub|odt|rtf|txt)\s*$/i, "").trim();
 }
 
+export function fileCopyTitleVariant(value: string): string | undefined {
+	if (value.length > 600) return undefined;
+	const match = value.match(/^(.+\S)\.(?:pdf|epub|docx?|odt|rtf|txt)\s+\u00b7\s+(?:versi[o\u00f3]n|copy|copia)\s+\d{1,4}(?:\.(?:pdf|epub|docx?|odt|rtf|txt))?\s*$/iu);
+	const title = match && cleanTitle(match[1]);
+	return title && title.length <= 500 ? title : undefined;
+}
+
 // Retrieval hypothesis only; a promotional-looking suffix is not proof of identity.
 export function awardTitleVariant(value: string): string | undefined {
 	if (value.length > 500) return undefined;
